@@ -1,0 +1,155 @@
+name: Sentinel Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  TF_DIR: terraform/environments/sandbox
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_cluster: ${{ steps.tf_out.outputs.backend_cluster }}
+      gateway_cluster: ${{ steps.tf_out.outputs.gateway_cluster }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.8.5"
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get outputs
+        id: tf_out
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          echo "backend_cluster=$(terraform output -raw eks_backend_cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "gateway_cluster=$(terraform output -raw eks_gateway_cluster_name)" >> "$GITHUB_OUTPUT"
+
+  deploy-backend:
+    needs: terraform
+    runs-on: ubuntu-latest
+    outputs:
+      backend_endpoint: ${{ steps.wait_lb.outputs.endpoint }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig (backend)
+        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.backend_cluster }} --region ${{ env.AWS_REGION }}
+
+      - name: Apply backend manifests
+        run: kubectl apply -f k8s/backend/
+
+      - name: Wait for internal NLB hostname
+        id: wait_lb
+        run: |
+          for i in $(seq 1 30); do
+            HOST=$(kubectl get svc backend-nlb -n sentinel-backend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$HOST" ]; then
+              echo "endpoint=$HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for backend NLB"
+          exit 1
+
+  deploy-gateway:
+    needs: [terraform, deploy-backend]
+    runs-on: ubuntu-latest
+    outputs:
+      proxy_endpoint: ${{ steps.wait_lb.outputs.endpoint }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig (gateway)
+        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.gateway_cluster }} --region ${{ env.AWS_REGION }}
+
+      - name: Render nginx config with backend endpoint
+        env:
+          BACKEND_ENDPOINT: ${{ needs.deploy-backend.outputs.backend_endpoint }}
+        run: envsubst '$BACKEND_ENDPOINT' < k8s/gateway/01-configmap.yaml > k8s/gateway/01-configmap.rendered.yaml
+
+      - name: Apply gateway manifests
+        run: |
+          kubectl apply -f k8s/gateway/00-namespace.yaml
+          kubectl apply -f k8s/gateway/01-configmap.rendered.yaml
+          kubectl apply -f k8s/gateway/02-deployment.yaml
+          kubectl apply -f k8s/gateway/03-service.yaml
+
+      - name: Wait for public NLB hostname
+        id: wait_lb
+        run: |
+          for i in $(seq 1 30); do
+            HOST=$(kubectl get svc proxy-nlb -n sentinel-gateway -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$HOST" ]; then
+              echo "endpoint=$HOST" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for gateway NLB"
+          exit 1
+
+  validate-e2e:
+    needs: deploy-gateway
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl proxy -> backend end-to-end
+        env:
+          PROXY_ENDPOINT: ${{ needs.deploy-gateway.outputs.proxy_endpoint }}
+        run: |
+          for i in $(seq 1 20); do
+            RESPONSE=$(curl -s -m 5 "http://$PROXY_ENDPOINT" || true)
+            echo "Attempt $i: $RESPONSE"
+            if echo "$RESPONSE" | grep -q "Hello from backend"; then
+              echo "✅ End-to-end validation successful"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "❌ End-to-end validation failed"
+          exit 1

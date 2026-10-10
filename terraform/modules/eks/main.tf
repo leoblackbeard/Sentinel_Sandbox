@@ -19,8 +19,6 @@ resource "aws_iam_role" "cluster" {
       Action = "sts:AssumeRole"
     }]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "cluster_policy" {
@@ -42,8 +40,6 @@ resource "aws_iam_role" "node" {
       Action = "sts:AssumeRole"
     }]
   })
-
-  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "worker_node_policy" {
@@ -88,6 +84,11 @@ resource "aws_eks_cluster" "this" {
     public_access_cidrs     = ["0.0.0.0/0"]
   }
 
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.cluster_policy
   ]
@@ -101,6 +102,7 @@ resource "aws_eks_node_group" "default" {
   node_group_name = "eks-${var.cluster_name}-ng-default"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.private_subnet_ids
+  ami_type        = "AL2023_x86_64_STANDARD"
 
   scaling_config {
     desired_size = var.desired_size
@@ -117,4 +119,22 @@ resource "aws_eks_node_group" "default" {
   ]
 
   tags = var.tags
+}
+
+resource "aws_eks_access_entry" "gha" {
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = var.gha_role_arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "gha_admin" {
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = var.gha_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.gha]
 }

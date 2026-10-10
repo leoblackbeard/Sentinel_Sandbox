@@ -25,3 +25,12 @@ credentials
 .DS_Store
 .vscode/
 *.swp
+tfplan
+*.tfplan
+terraform/bootstrap/terraform.tfstate
+terraform/bootstrap/terraform.tfstate.backup
+terraform/bootstrap/.terraform/
+terraform/bootstrap/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.backup
+**/.terraform/

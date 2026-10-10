@@ -60,11 +60,6 @@ module "eks_gateway" {
   desired_size  = 2
   min_size      = 2
   max_size      = 2
-
-  tags = {
-    Project = "sentinel"
-    Tier    = "gateway"
-  }
 }
 
 module "eks_backend" {
@@ -74,15 +69,10 @@ module "eks_backend" {
   vpc_id             = module.vpc_backend.vpc_id
   private_subnet_ids = module.vpc_backend.private_subnet_ids
   allowed_peer_cidr_blocks = [module.vpc_gateway.vpc_cidr]
-  allowed_peer_port        = 443
+  allowed_peer_port        = 8080
 
-  instance_type = ["t3.micro"]
+  instance_type = ["t3.medium"]
   desired_size  = 2
   min_size      = 2
   max_size      = 2
-
-  tags = {
-    Project = "sentinel"
-    Tier    = "backend"
-  }
 }

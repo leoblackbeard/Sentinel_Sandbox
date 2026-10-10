@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-proxy-conf
+  namespace: sentinel-gateway
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 80;
+        location / {
+          proxy_pass http://${BACKEND_ENDPOINT}:8080;
+          proxy_set_header Host $host;
+        }
+      }
+    }

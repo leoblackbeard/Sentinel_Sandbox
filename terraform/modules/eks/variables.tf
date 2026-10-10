@@ -16,13 +16,13 @@ variable "private_subnet_ids" {
 variable "cluster_version" {
   type        = string
   description = "EKS control plane version"
-  default     = "1.29"
+  default     = "1.30"
 }
 
 variable "instance_type" {
   type        = list(string)
   description = "EC2 instance type for managed node group"
-  default     = ["t3.micro"]
+  default     = ["t3.medium"]
 }
 
 variable "desired_size" {
@@ -49,9 +49,14 @@ variable "allowed_peer_cidr_blocks" {
 variable "allowed_peer_port" {
   description = "TCP ports allowed from peered VPC CIDR"
   type        = number
-  default     = 443
+  default     = 8080
 }
 
+variable "gha_role_arn" {
+  type        = string
+  description = "IAM Role ARN for GitHub Actions OIDC deploy role"
+  default     = "arn:aws:iam::721500739616:role/sentinel-leoblackbeard-gha-deploy"
+}
 
 variable "tags" {
   type    = map(string)
