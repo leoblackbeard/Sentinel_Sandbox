@@ -180,7 +180,7 @@ Values flow between jobs through job `outputs`, because each job runs on a fresh
 | Backend hostname injected with `envsubst` | No shared DNS or mesh needed | A recreated backend NLB requires redeploying the gateway | Route 53 private hosted zone with a stable name |
 | Public EKS API endpoint | GitHub-hosted runners must reach `kubectl` | Larger attack surface | Private endpoint + self-hosted runners in the VPC |
 | Plan and apply in the same run | Fast iteration | No human review of the plan | Plan on PR, apply on merge with a protected environment |
-| Static AWS keys in CI | OIDC role assumption is denied (below) | Long-lived credentials | GitHub OIDC federation |
+| Static AWS keys in CI | The OIDC role's trust policy cannot be corrected with the granted permissions (below) | Long-lived credentials | GitHub OIDC federation |
 
 ### Permission constraints encountered
 
@@ -188,18 +188,31 @@ Values flow between jobs through job `outputs`, because each job runs on a fresh
 | --- | --- | --- | --- |
 | `iam:CreatePolicy` denied | No customer-managed policies | Inline policies on the `eks-*` roles | Versioned managed policies owned by a platform team |
 | Only `eks-*` / `sentinel-*` roles can be created or passed | Role names are constrained | `eks-<cluster>-{cluster,node,lbc}-role`, `sentinel-leoblackbeard-gha-deploy` | Same; it is a sensible guardrail |
-| `sts:AssumeRoleWithWebIdentity` denied for the OIDC role | The pipeline cannot use OIDC | Static IAM user keys stored as GitHub secrets | Fix the trust/guardrail and remove static keys |
+| `iam:UpdateAssumeRolePolicy` denied on `sentinel-*` roles | The OIDC role's trust policy cannot be fixed after creation, so OIDC stays unusable | Static IAM user keys stored as GitHub secrets | Have the platform team apply the corrected trust policy, then remove the static keys |
 
-### GitHub OIDC (bonus): status
+### GitHub OIDC (bonus): root cause found, fix blocked by permissions
 
-- The GitHub OIDC provider exists in the account (audience `sts.amazonaws.com`).
-- The role `sentinel-leoblackbeard-gha-deploy` trusts `repo:leoblackbeard/Sentinel_Sandbox:*`.
-- `AWS_ROLE_ARN` was verified to match the role.
-- Despite that, `AssumeRoleWithWebIdentity` returns `AccessDenied`. `oidc-debug.yml` prints the token claims and calls STS directly to isolate the cause. The remaining candidates are a claim mismatch in the trust policy or an account-level guardrail outside this repository.
+The OIDC plumbing is in place: the GitHub OIDC provider exists in the account, the role `sentinel-leoblackbeard-gha-deploy` exists with scoped permissions and an EKS access entry, and `AWS_ROLE_ARN` points to it. `AssumeRoleWithWebIdentity` still returned `AccessDenied`, so the pipeline uses static IAM user keys.
+
+**Root cause.** `oidc-debug.yml` decodes the job's token. GitHub issues the subject with immutable owner and repository IDs:
+
+```
+sub = repo:leoblackbeard@316173717/Sentinel_Sandbox@1412442294:ref:refs/heads/main
+```
+
+The trust policy expected `repo:leoblackbeard/Sentinel_Sandbox:*`, so the condition never matched.
+
+**Fix (in code, not applied).** `terraform/bootstrap/main.tf` now accepts both subject formats. Pinning the numeric IDs is also safer: a deleted and re-created repository with the same name cannot inherit the role. Applying it failed with:
+
+```
+not authorized to perform: iam:UpdateAssumeRolePolicy on resource: role sentinel-leoblackbeard-gha-deploy
+```
+
+Per the challenge rules, I did not work around this (for example by deleting and re-creating the role). In a real environment I would ask the platform team to apply the corrected trust policy, or to grant `iam:UpdateAssumeRolePolicy` on `sentinel-*` roles. Then I would switch the workflows to `role-to-assume` and delete the static keys; that change is a few lines per job.
 
 ### Local applies (honest disclosure)
 
-`terraform/bootstrap` creates the OIDC deploy role that the pipeline would assume, so it cannot be applied by that same pipeline (chicken-and-egg). It was applied once from a local machine on 2026-10-10, and again on 2026-10-11 to extend its policy for the LB Controller roles. The second apply was unnecessary in hindsight, because the pipeline uses static keys. Everything under `terraform/environments/` is applied only by GitHub Actions.
+`terraform/bootstrap` creates the OIDC deploy role that the pipeline would assume, so it cannot be applied by that same pipeline (chicken-and-egg). It was applied from a local machine on 2026-10-10 to create the role and on 2026-10-11 to extend its policy for the LB Controller roles. A third apply on 2026-10-11, to fix the trust policy, was denied (above) and changed nothing. Everything under `terraform/environments/` is applied only by GitHub Actions.
 
 ### Issues found and fixed along the way
 
