@@ -16,16 +16,27 @@ resource "aws_internet_gateway" "this" {
   })
 }
 
+# Una subnet pública por AZ: un NLB internet-facing solo envía tráfico a
+# destinos (IPs de pods) en AZs donde tiene subnet. Con una sola, los pods de
+# la otra AZ quedan "unused" y la conexión expira.
 resource "aws_subnet" "public" {
+  count                   = length(var.public_subnet_cidrs)
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet_cidr
-  availability_zone       = var.azs[0]
+  cidr_block              = var.public_subnet_cidrs[count.index]
+  availability_zone       = var.azs[count.index]
   map_public_ip_on_launch = false
 
   tags = merge(var.tags, {
-    Name                     = "${var.name_prefix}-public-${var.azs[0]}"
+    Name                     = "${var.name_prefix}-public-${var.azs[count.index]}"
     "kubernetes.io/role/elb" = "1"
   })
+}
+
+# La subnet pública original pasa a ser el índice 0 sin recrearse
+# (ni ella ni el NAT Gateway que vive en ella).
+moved {
+  from = aws_subnet.public
+  to   = aws_subnet.public[0]
 }
 
 resource "aws_subnet" "private" {
@@ -50,7 +61,7 @@ resource "aws_eip" "nat" {
 
 resource "aws_nat_gateway" "this" {
   allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public.id
+  subnet_id     = aws_subnet.public[0].id
 
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-nat"
@@ -74,8 +85,14 @@ resource "aws_route" "public_igw" {
 }
 
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
+}
+
+moved {
+  from = aws_route_table_association.public
+  to   = aws_route_table_association.public[0]
 }
 
 resource "aws_route_table" "private" {

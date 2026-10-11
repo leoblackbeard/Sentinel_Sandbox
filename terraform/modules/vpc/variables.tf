@@ -13,9 +13,9 @@ variable "azs" {
   type        = list(string)
 }
 
-variable "public_subnet_cidr" {
-  description = "CIDR block for public subnet"
-  type        = string
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for public subnets, one per AZ (same order as azs)"
+  type        = list(string)
 }
 
 variable "private_subnet_cidrs" {

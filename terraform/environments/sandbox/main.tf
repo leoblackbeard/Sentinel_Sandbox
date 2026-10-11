@@ -8,7 +8,7 @@ module "vpc_gateway" {
   name_prefix          = "gateway"
   vpc_cidr             = "10.10.0.0/16"
   azs                  = local.azs
-  public_subnet_cidr   = "10.10.0.0/24"
+  public_subnet_cidrs  = ["10.10.0.0/24", "10.10.1.0/24"]
   private_subnet_cidrs = ["10.10.10.0/24", "10.10.11.0/24"]
 
   tags = {
@@ -23,7 +23,7 @@ module "vpc_backend" {
   name_prefix          = "backend"
   vpc_cidr             = "10.20.0.0/16"
   azs                  = local.azs
-  public_subnet_cidr   = "10.20.0.0/24"
+  public_subnet_cidrs  = ["10.20.0.0/24", "10.20.1.0/24"]
   private_subnet_cidrs = ["10.20.10.0/24", "10.20.11.0/24"]
 
   tags = {

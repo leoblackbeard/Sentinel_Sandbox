@@ -146,16 +146,19 @@ jobs:
         run: bash scripts/wait-lb.sh sentinel-gateway proxy-nlb
 
   validate-e2e:
-    needs: deploy-gateway
+    needs: [terraform, deploy-backend, deploy-gateway]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - name: Curl proxy -> backend end-to-end
         env:
           PROXY_ENDPOINT: ${{ needs.deploy-gateway.outputs.proxy_endpoint }}
         run: |
           # Un NLB nuevo tarda unos minutos en registrar targets y propagar DNS.
           for i in $(seq 1 40); do
-            RESPONSE=$(curl -s -m 5 "http://$PROXY_ENDPOINT" || true)
+            # -sS: silencioso, pero muestra el error (timeout, DNS, conexión rechazada).
+            RESPONSE=$(curl -sS -m 5 "http://$PROXY_ENDPOINT" 2>&1 || true)
             echo "Attempt $i: $RESPONSE"
             if echo "$RESPONSE" | grep -q "Hello from backend"; then
               echo "✅ End-to-end validation successful"
@@ -165,3 +168,19 @@ jobs:
           done
           echo "❌ End-to-end validation failed"
           exit 1
+
+      # Solo si falló: separa el problema por tramos para no adivinar.
+      - name: Diagnose (on failure)
+        if: failure()
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Diagnose NLBs and both legs (on failure)
+        if: failure()
+        env:
+          GATEWAY_CLUSTER: ${{ needs.terraform.outputs.gateway_cluster }}
+          BACKEND_ENDPOINT: ${{ needs.deploy-backend.outputs.backend_endpoint }}
+        run: bash scripts/diagnose-e2e.sh
