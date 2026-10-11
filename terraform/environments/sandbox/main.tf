@@ -54,7 +54,6 @@ module "eks_gateway" {
 
   cluster_name       = "eks-gateway"
   cluster_version    = "1.31"
-  vpc_id             = module.vpc_gateway.vpc_id
   private_subnet_ids = module.vpc_gateway.private_subnet_ids
 
   instance_type = ["t3.medium"]
@@ -68,7 +67,6 @@ module "eks_backend" {
 
   cluster_name       = "eks-backend"
   cluster_version    = "1.31"
-  vpc_id             = module.vpc_backend.vpc_id
   private_subnet_ids = module.vpc_backend.private_subnet_ids
   allowed_peer_cidr_blocks = [module.vpc_gateway.vpc_cidr]
   allowed_peer_port        = 8080

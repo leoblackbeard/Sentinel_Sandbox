@@ -21,7 +21,23 @@ env:
   LBC_CHART_VERSION: ""
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.64.0
+
+      - name: TFLint (all modules, recommended preset)
+        working-directory: terraform
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
+
   terraform:
+    needs: lint
     runs-on: ubuntu-latest
     outputs:
       backend_cluster: ${{ steps.tf_out.outputs.backend_cluster }}
@@ -94,6 +110,12 @@ jobs:
       - name: Recreate Service if created before the controller
         run: bash scripts/recreate-orphan-svc.sh sentinel-backend backend-nlb
 
+      - name: Validate backend manifests (server-side dry run)
+        run: |
+          # El namespace se crea de verdad: el dry run de objetos con namespace lo necesita.
+          kubectl apply -f k8s/backend/00-namespace.yaml
+          kubectl apply --dry-run=server -f k8s/backend/
+
       - name: Apply backend manifests
         run: |
           kubectl apply -f k8s/backend/
@@ -130,6 +152,14 @@ jobs:
         env:
           BACKEND_ENDPOINT: ${{ needs.deploy-backend.outputs.backend_endpoint }}
         run: envsubst '$BACKEND_ENDPOINT' < k8s/gateway/01-configmap.yaml > k8s/gateway/01-configmap.rendered.yaml
+
+      - name: Validate gateway manifests (server-side dry run)
+        run: |
+          kubectl apply -f k8s/gateway/00-namespace.yaml
+          kubectl apply --dry-run=server \
+            -f k8s/gateway/01-configmap.rendered.yaml \
+            -f k8s/gateway/02-deployment.yaml \
+            -f k8s/gateway/03-service.yaml
 
       - name: Apply gateway manifests
         run: |

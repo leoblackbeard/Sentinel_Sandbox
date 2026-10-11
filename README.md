@@ -158,9 +158,10 @@ Trigger: `push` to `main` (and `workflow_dispatch`). A `concurrency` group preve
 
 | Job | Steps |
 | --- | --- |
+| `lint` | `tflint --recursive` over every module with the recommended preset (`.tflint.hcl`); the pipeline stops here on any finding |
 | `terraform` | `init` → `validate` → `plan -out=tfplan` → `apply tfplan` → export cluster names and VPC IDs as job outputs |
-| `deploy-backend` | kubeconfig → install/upgrade LB Controller → apply `k8s/backend/` → wait for rollout → wait for the internal NLB hostname |
-| `deploy-gateway` | kubeconfig → install/upgrade LB Controller → render NGINX ConfigMap with the backend hostname → apply `k8s/gateway/` → restart NGINX only if its ConfigMap changed → wait until the pods are healthy in the NLB → wait for the public NLB hostname |
+| `deploy-backend` | kubeconfig → install/upgrade LB Controller → `kubectl apply --dry-run=server` on `k8s/backend/` → apply → wait for rollout → wait for the internal NLB hostname |
+| `deploy-gateway` | kubeconfig → install/upgrade LB Controller → render NGINX ConfigMap with the backend hostname → `kubectl apply --dry-run=server` on the rendered manifests → apply `k8s/gateway/` → restart NGINX only if its ConfigMap changed → wait until the pods are healthy in the NLB → wait for the public NLB hostname |
 | `validate-e2e` | up to 40 × `curl` the public NLB, expecting `Hello from backend`, logging live target health on every attempt. On failure, `scripts/diagnose-e2e.sh` dumps NLB AZs, target health, security groups and routes, and tests each leg from inside an NGINX pod |
 
 Both namespaces carry the label `elbv2.k8s.aws/pod-readiness-gate-inject: enabled`. The controller then adds a readiness gate to every pod: a pod only counts as Ready once the NLB reports it healthy, so `kubectl rollout status` waits for real traffic and a rollout never removes old pods before the new ones are serving.
@@ -231,5 +232,5 @@ Per the challenge rules, I did not work around this (for example by deleting and
 - **NetworkPolicies** inside each cluster (e.g. only the NGINX pods may egress to 10.20.0.0/16).
 - **Service mesh / mTLS** between clusters (or PrivateLink) for zero-trust service-to-service traffic.
 - **HA networking**: one NAT Gateway per AZ.
-- **Pipeline hardening**: plan on pull requests, manual approval before apply, `tflint` and `kubectl apply --dry-run=server` gates, Helm chart version pinning, reusable composite actions.
+- **Pipeline hardening**: plan on pull requests, manual approval before apply, Helm chart version pinning, reusable composite actions.
 - **Autoscaling**: Cluster Autoscaler or Karpenter, and HPA on the proxy.
