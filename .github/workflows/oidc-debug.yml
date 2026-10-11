@@ -1,0 +1,42 @@
+name: OIDC debug
+
+# Solo manual: Actions -> "OIDC debug" -> Run workflow.
+# Muestra los claims del token de GitHub y prueba asumir el rol directamente,
+# para ver el error exacto de STS sin depender del secreto AWS_ROLE_ARN.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ROLE_ARN: arn:aws:iam::721500739616:role/sentinel-leoblackbeard-gha-deploy
+  AWS_REGION: eu-central-1
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show OIDC token claims (no secrets printed)
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          echo "$TOKEN" | python3 -c 'import sys,json,base64;p=sys.stdin.read().split(".")[1];p+="="*(-len(p)%4);c=json.loads(base64.urlsafe_b64decode(p));print(json.dumps({k:c.get(k) for k in ["iss","aud","sub","repository","ref","repository_owner"]},indent=1))'
+          echo "$TOKEN" > "$RUNNER_TEMP/token"
+
+      - name: Try AssumeRoleWithWebIdentity directly
+        run: |
+          aws sts assume-role-with-web-identity \
+            --role-arn "$ROLE_ARN" \
+            --role-session-name oidc-debug \
+            --web-identity-token "file://$RUNNER_TEMP/token" \
+            --query 'AssumedRoleUser.Arn' --output text
+
+      - name: Compare with the AWS_ROLE_ARN secret
+        env:
+          SECRET_ROLE: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$SECRET_ROLE" ]; then echo "AWS_ROLE_ARN está vacío o no existe"; exit 0; fi
+          if [ "$SECRET_ROLE" = "$ROLE_ARN" ]; then echo "AWS_ROLE_ARN coincide con el rol"; else echo "AWS_ROLE_ARN NO coincide con $ROLE_ARN"; fi
