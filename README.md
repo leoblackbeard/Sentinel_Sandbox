@@ -117,7 +117,7 @@ curl http://$HOST        # -> Hello from backend
 
 ### Tear down
 
-Run **Actions → Sentinel Destroy → Run workflow** and type `destroy-sentinel`. It deletes the Kubernetes namespaces first, so the AWS Load Balancer Controller removes the NLBs and their security groups, waits for them to disappear, and then runs `terraform destroy`. The reverse order would leave controller-owned resources inside the VPCs and block their deletion. To rebuild from scratch, run **Sentinel Deploy → Run workflow**.
+Run **Actions → Sentinel Destroy → Run workflow** and type `destroy-sentinel`. It deletes the Kubernetes namespaces first, so the AWS Load Balancer Controller removes the NLBs and their security groups, waits for them to disappear, and then runs `terraform destroy`. The reverse order would leave controller-owned resources inside the VPCs and block their deletion. To rebuild from scratch, run **Sentinel Deploy → Run workflow**. With the challenge permissions, the two LB Controller IAM roles and their inline policies cannot be deleted (`iam:DeleteRolePolicy` is not granted): the destroy run removes everything else and fails on those two, which stay in state and are reused by the next deploy.
 
 For a full read-only health report (NLB AZs, target health, security groups, routes, in-pod tests), run **Actions → Diagnose e2e → Run workflow** (~1 minute).
 
@@ -194,6 +194,7 @@ Values flow between jobs through job `outputs`, because each job runs on a fresh
 | --- | --- | --- | --- |
 | `iam:CreatePolicy` denied | No customer-managed policies | Inline policies on the `eks-*` roles | Versioned managed policies owned by a platform team |
 | Only `eks-*` / `sentinel-*` roles can be created or passed | Role names are constrained | `eks-<cluster>-{cluster,node,lbc}-role`, `sentinel-leoblackbeard-gha-deploy` | Same; it is a sensible guardrail |
+| `iam:DeleteRolePolicy` denied on `eks-*` roles | `terraform destroy` cannot remove the LB Controller roles' inline policies, so `eks-eks-{gateway,backend}-lbc-role` survive a teardown | They stay in Terraform state and are reused by the next deploy; everything else is destroyed and recreated | Grant the delete counterpart of every create permission, or attach managed policies instead of inline ones |
 | `iam:UpdateAssumeRolePolicy` denied on `sentinel-*` roles | The OIDC role's trust policy cannot be fixed after creation, so OIDC stays unusable | Static IAM user keys stored as GitHub secrets | Have the platform team apply the corrected trust policy, then remove the static keys |
 
 ### GitHub OIDC (bonus): root cause found, fix blocked by permissions
