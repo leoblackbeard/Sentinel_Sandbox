@@ -65,6 +65,7 @@ scripts/                  # helpers used by the workflows
   deploy.yml              # main pipeline (push to main)
   diagnose.yml            # manual: read-only health check of the whole path
   oidc-debug.yml          # manual: OIDC federation troubleshooting
+  destroy.yml             # manual, typed confirmation: tear everything down
 ```
 
 ### Terraform modules
@@ -113,6 +114,10 @@ HOST=$(aws elbv2 describe-load-balancers --names sentinel-gateway-nlb \
   --query 'LoadBalancers[0].DNSName' --output text)
 curl http://$HOST        # -> Hello from backend
 ```
+
+### Tear down
+
+Run **Actions → Sentinel Destroy → Run workflow** and type `destroy-sentinel`. It deletes the Kubernetes namespaces first, so the AWS Load Balancer Controller removes the NLBs and their security groups, waits for them to disappear, and then runs `terraform destroy`. The reverse order would leave controller-owned resources inside the VPCs and block their deletion. To rebuild from scratch, run **Sentinel Deploy → Run workflow**.
 
 For a full read-only health report (NLB AZs, target health, security groups, routes, in-pod tests), run **Actions → Diagnose e2e → Run workflow** (~1 minute).
 

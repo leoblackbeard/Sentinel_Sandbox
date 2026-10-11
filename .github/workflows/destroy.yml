@@ -1,0 +1,55 @@
+name: Sentinel Destroy
+
+# Manual y con confirmación: Actions -> "Sentinel Destroy" -> Run workflow,
+# escribiendo "destroy-sentinel". Borra primero lo que creó Kubernetes (NLBs y
+# sus security groups, gestionados por el AWS LB Controller) y después todo lo
+# de Terraform. Si se invierte el orden, la VPC no se puede borrar.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Escribe "destroy-sentinel" para confirmar'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+# Mismo grupo que el despliegue: nunca corren a la vez.
+concurrency:
+  group: sentinel-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  TF_DIR: terraform/environments/sandbox
+
+jobs:
+  destroy:
+    if: ${{ github.event.inputs.confirm == 'destroy-sentinel' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.3"
+          terraform_wrapper: false
+
+      - name: Delete Kubernetes workloads (the controller removes the NLBs)
+        run: bash scripts/destroy-k8s.sh
+
+      - name: Terraform destroy
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false
+          terraform destroy -input=false -auto-approve
