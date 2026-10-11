@@ -32,6 +32,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.10.3"
+          terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: ${{ env.TF_DIR }}
@@ -55,12 +56,15 @@ jobs:
           TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
         run: terraform apply -auto-approve tfplan
 
-      - name: Get outputs
+      - name: Get outputs                  # <-- CAMBIO 2 (reemplaza el step viejo)
         id: tf_out
         working-directory: ${{ env.TF_DIR }}
         run: |
-          echo "backend_cluster=$(terraform output -raw eks_backend_cluster_name)" >> "$GITHUB_OUTPUT"
-          echo "gateway_cluster=$(terraform output -raw eks_gateway_cluster_name)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          BACKEND=$(terraform output -raw eks_backend_cluster_name)
+          GATEWAY=$(terraform output -raw eks_gateway_cluster_name)
+          echo "backend_cluster=$BACKEND" >> "$GITHUB_OUTPUT"
+          echo "gateway_cluster=$GATEWAY" >> "$GITHUB_OUTPUT"
 
   deploy-backend:
     needs: terraform
