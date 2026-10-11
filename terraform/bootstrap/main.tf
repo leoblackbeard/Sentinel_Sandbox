@@ -86,7 +86,12 @@ locals {
     "arn:aws:iam::721500739616:role/eks-eks-gateway-node-role",
     "arn:aws:iam::721500739616:role/eks-eks-backend-node-role",
   ]
-  managed_eks_role_arns = concat(local.eks_cluster_role_arns, local.eks_node_role_arns)
+  # Roles del AWS Load Balancer Controller (EKS Pod Identity), uno por cluster
+  eks_lbc_role_arns = [
+    "arn:aws:iam::721500739616:role/eks-eks-gateway-lbc-role",
+    "arn:aws:iam::721500739616:role/eks-eks-backend-lbc-role",
+  ]
+  managed_eks_role_arns = concat(local.eks_cluster_role_arns, local.eks_node_role_arns, local.eks_lbc_role_arns)
 
   managed_aws_policy_arns = [
     "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
@@ -145,6 +150,15 @@ resource "aws_iam_role_policy" "eks_role_lifecycle" {
         Resource = local.eks_node_role_arns
         Condition = {
           StringEquals = { "iam:PassedToService" = "ec2.amazonaws.com" }
+        }
+      },
+      {
+        Sid      = "PassRoleLbcPodIdentity"
+        Effect   = "Allow"
+        Action   = "iam:PassRole"
+        Resource = local.eks_lbc_role_arns
+        Condition = {
+          StringEquals = { "iam:PassedToService" = "pods.eks.amazonaws.com" }
         }
       }
     ]

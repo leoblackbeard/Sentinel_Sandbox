@@ -10,6 +10,10 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-name: "sentinel-backend-nlb"
 spec:
   type: LoadBalancer
+  # NLB interno: por defecto el controller solo abre su propia VPC (10.20.0.0/16).
+  # El proxy vive en la VPC gateway y llega por el peering.
+  loadBalancerSourceRanges:
+    - 10.10.0.0/16
   selector:
     app: backend
   ports:
