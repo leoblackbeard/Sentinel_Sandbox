@@ -35,8 +35,15 @@ resource "aws_iam_role" "gha_deploy" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
+        # GitHub emite el sub con los IDs inmutables del dueño y del repo
+        # (repo:<owner>@<owner_id>/<repo>@<repo_id>:...). Se acepta también el
+        # formato clásico por compatibilidad. IDs: leoblackbeard = 316173717,
+        # Sentinel_Sandbox = 1412442294 (API de GitHub).
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:leoblackbeard/Sentinel_Sandbox:*"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:leoblackbeard@316173717/Sentinel_Sandbox@1412442294:*",
+            "repo:leoblackbeard/Sentinel_Sandbox:*",
+          ]
         }
       }
     }]
