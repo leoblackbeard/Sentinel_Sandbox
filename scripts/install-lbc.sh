@@ -21,7 +21,12 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
   --set vpcId="$VPC_ID" \
   --set serviceAccount.create=true \
   --set serviceAccount.name=aws-load-balancer-controller \
+  --set keepTLSSecret=true \
   --wait --timeout 5m
 
-# El webhook del controller debe estar listo antes de crear Services.
+# keepTLSSecret=true: sin esto cada `helm upgrade` genera un certificado nuevo
+# para el webhook mientras los pods siguen sirviendo el anterior ("x509:
+# certificate signed by unknown authority"), y el controller deja de registrar
+# targets. Reiniciamos para que los pods carguen el certificado vigente.
+kubectl -n kube-system rollout restart deployment/aws-load-balancer-controller
 kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=180s

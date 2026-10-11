@@ -10,6 +10,10 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-name: "sentinel-gateway-nlb"
     # Reparte entre AZs aunque un nodo del NLB solo tenga pods en la otra zona.
     service.beta.kubernetes.io/aws-load-balancer-attributes: "load_balancing.cross_zone.enabled=true"
+    # Subnets explícitas (por tag Name, creadas por Terraform). Sin esto, el
+    # controller conserva para siempre las subnets con las que nació el NLB y
+    # nunca añade una AZ nueva: los pods de esa AZ quedan "unused".
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "gateway-public-eu-central-1a, gateway-public-eu-central-1b"
 spec:
   type: LoadBalancer
   selector:
