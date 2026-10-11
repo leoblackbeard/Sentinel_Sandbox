@@ -56,15 +56,17 @@ jobs:
           TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
         run: terraform apply -auto-approve tfplan
 
-      - name: Get outputs                  # <-- CAMBIO 2 (reemplaza el step viejo)
-        id: tf_out
+      - name: Get outputs
         working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
         run: |
           set -euo pipefail
           BACKEND=$(terraform output -raw eks_backend_cluster_name)
           GATEWAY=$(terraform output -raw eks_gateway_cluster_name)
           echo "backend_cluster=$BACKEND" >> "$GITHUB_OUTPUT"
           echo "gateway_cluster=$GATEWAY" >> "$GITHUB_OUTPUT"
+
 
   deploy-backend:
     needs: terraform
