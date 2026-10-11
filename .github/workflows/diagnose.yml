@@ -1,0 +1,35 @@
+name: Diagnose e2e
+
+# Manual: Actions -> "Diagnose e2e" -> Run workflow. Tarda ~1 minuto y no
+# toca Terraform ni Kubernetes: solo lee el estado de los NLB y prueba el camino.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Diagnose
+        run: bash scripts/diagnose-e2e.sh
+
+      - name: Curl from the internet (this runner)
+        run: |
+          HOST=$(aws elbv2 describe-load-balancers --names sentinel-gateway-nlb \
+            --query 'LoadBalancers[0].DNSName' --output text)
+          echo "Host: $HOST"
+          getent hosts "$HOST" || true
+          curl -sS -m 10 -v "http://$HOST" || true
