@@ -160,8 +160,10 @@ Trigger: `push` to `main` (and `workflow_dispatch`). A `concurrency` group preve
 | --- | --- |
 | `terraform` | `init` → `validate` → `plan -out=tfplan` → `apply tfplan` → export cluster names and VPC IDs as job outputs |
 | `deploy-backend` | kubeconfig → install/upgrade LB Controller → apply `k8s/backend/` → wait for rollout → wait for the internal NLB hostname |
-| `deploy-gateway` | kubeconfig → install/upgrade LB Controller → render NGINX ConfigMap with the backend hostname → apply `k8s/gateway/` → restart NGINX → wait for the public NLB hostname |
-| `validate-e2e` | up to 40 × `curl` the public NLB, expecting `Hello from backend`. On failure, `scripts/diagnose-e2e.sh` dumps NLB AZs, target health, security groups and routes, and tests each leg from inside an NGINX pod |
+| `deploy-gateway` | kubeconfig → install/upgrade LB Controller → render NGINX ConfigMap with the backend hostname → apply `k8s/gateway/` → restart NGINX only if its ConfigMap changed → wait until the pods are healthy in the NLB → wait for the public NLB hostname |
+| `validate-e2e` | up to 40 × `curl` the public NLB, expecting `Hello from backend`, logging live target health on every attempt. On failure, `scripts/diagnose-e2e.sh` dumps NLB AZs, target health, security groups and routes, and tests each leg from inside an NGINX pod |
+
+Both namespaces carry the label `elbv2.k8s.aws/pod-readiness-gate-inject: enabled`. The controller then adds a readiness gate to every pod: a pod only counts as Ready once the NLB reports it healthy, so `kubectl rollout status` waits for real traffic and a rollout never removes old pods before the new ones are serving.
 
 Values flow between jobs through job `outputs`, because each job runs on a fresh runner.
 
@@ -203,7 +205,8 @@ Values flow between jobs through job `outputs`, because each job runs on a fresh
 
 - **Services stuck in `<pending>`**: the manifests target the AWS Load Balancer Controller (`aws-load-balancer-type: external`), which was not installed. Fixed by installing it with Pod Identity.
 - **Public NLB in a single AZ**: with only one public subnet, NGINX pods in the other AZ were `Target.NotInUse`. A second public subnet was added; `moved` blocks kept the existing subnet and NAT intact. The controller keeps an existing NLB's subnets unless the `aws-load-balancer-subnets` annotation is set, so both subnets are now pinned explicitly.
-- **Controller webhook certificate rotated on every `helm upgrade`** (`x509: certificate signed by unknown authority`), which stalled target registration. Fixed with `keepTLSSecret=true` and a controller restart after upgrade.
+- **Controller webhook certificate rotated on every `helm upgrade`** (`x509: certificate signed by unknown authority`), which stalled target registration. Fixed with `keepTLSSecret=true`.
+- **Intermittent e2e timeouts after green deploys**: every run restarted NGINX (new pod IPs) and the controller, so the public NLB had to re-register targets while `validate-e2e` was already probing it. Fixed by restarting NGINX only when its config changes and by pod readiness gates, so the deploy job finishes only when the NLB has healthy targets.
 
 ---
 

@@ -2,3 +2,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: sentinel-backend
+  labels:
+    # El AWS LB Controller añade un readiness gate a los pods: un pod no cuenta
+    # como Ready hasta que el NLB lo tiene healthy. Así un rollout no retira los
+    # pods viejos antes de que los nuevos reciban tráfico.
+    elbv2.k8s.aws/pod-readiness-gate-inject: enabled

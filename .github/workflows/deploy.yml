@@ -97,7 +97,7 @@ jobs:
       - name: Apply backend manifests
         run: |
           kubectl apply -f k8s/backend/
-          kubectl -n sentinel-backend rollout status deployment/backend --timeout=180s
+          kubectl -n sentinel-backend rollout status deployment/backend --timeout=600s
 
       - name: Wait for internal NLB hostname
         id: wait_lb
@@ -134,12 +134,18 @@ jobs:
       - name: Apply gateway manifests
         run: |
           kubectl apply -f k8s/gateway/00-namespace.yaml
-          kubectl apply -f k8s/gateway/01-configmap.rendered.yaml
+          CM=$(kubectl apply -f k8s/gateway/01-configmap.rendered.yaml)
+          echo "$CM"
           kubectl apply -f k8s/gateway/02-deployment.yaml
           kubectl apply -f k8s/gateway/03-service.yaml
-          # nginx solo lee la config al arrancar: reinicia si cambió el ConfigMap.
-          kubectl -n sentinel-gateway rollout restart deployment/proxy
-          kubectl -n sentinel-gateway rollout status deployment/proxy --timeout=180s
+          # nginx solo lee la config al arrancar: reinicia SOLO si cambió el
+          # ConfigMap. Reiniciar siempre cambiaba las IPs de los pods en cada
+          # run y obligaba al NLB a registrarlos de nuevo.
+          if echo "$CM" | grep -q configured; then
+            kubectl -n sentinel-gateway rollout restart deployment/proxy
+          fi
+          # Con el readiness gate, esto espera también a que el NLB tenga los pods healthy.
+          kubectl -n sentinel-gateway rollout status deployment/proxy --timeout=600s
 
       - name: Wait for public NLB hostname
         id: wait_lb
@@ -151,15 +157,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Curl proxy -> backend end-to-end
         env:
           PROXY_ENDPOINT: ${{ needs.deploy-gateway.outputs.proxy_endpoint }}
         run: |
-          # Un NLB nuevo tarda unos minutos en registrar targets y propagar DNS.
+          TG=$(aws elbv2 describe-target-groups \
+            --load-balancer-arn "$(aws elbv2 describe-load-balancers --names sentinel-gateway-nlb \
+              --query 'LoadBalancers[0].LoadBalancerArn' --output text)" \
+            --query 'TargetGroups[0].TargetGroupArn' --output text)
+          echo "Public NLB resolves to: $(getent ahostsv4 "$PROXY_ENDPOINT" | awk '{print $1}' | sort -u | tr '\n' ' ')"
           for i in $(seq 1 40); do
+            # Estado de los destinos en este momento: separa "aún no registrados" de "red".
+            TARGETS=$(aws elbv2 describe-target-health --target-group-arn "$TG" \
+              --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' --output text | tr '\t\n' ': ' )
             # -sS: silencioso, pero muestra el error (timeout, DNS, conexión rechazada).
             RESPONSE=$(curl -sS -m 5 "http://$PROXY_ENDPOINT" 2>&1 || true)
-            echo "Attempt $i: $RESPONSE"
+            echo "Attempt $i [targets $TARGETS]: $RESPONSE"
             if echo "$RESPONSE" | grep -q "Hello from backend"; then
               echo "✅ End-to-end validation successful"
               exit 0
@@ -170,14 +189,6 @@ jobs:
           exit 1
 
       # Solo si falló: separa el problema por tramos para no adivinar.
-      - name: Diagnose (on failure)
-        if: failure()
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Diagnose NLBs and both legs (on failure)
         if: failure()
         env:

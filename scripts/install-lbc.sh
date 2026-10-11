@@ -26,7 +26,7 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
 
 # keepTLSSecret=true: sin esto cada `helm upgrade` genera un certificado nuevo
 # para el webhook mientras los pods siguen sirviendo el anterior ("x509:
-# certificate signed by unknown authority"), y el controller deja de registrar
-# targets. Reiniciamos para que los pods carguen el certificado vigente.
-kubectl -n kube-system rollout restart deployment/aws-load-balancer-controller
+# certificate signed by unknown authority") y el controller deja de registrar
+# targets. Con el secreto estable no hace falta reiniciar el controller en cada
+# despliegue (reiniciarlo fuerza una nueva elección de líder y retrasa el registro).
 kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=180s
