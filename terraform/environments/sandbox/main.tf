@@ -53,6 +53,7 @@ module "eks_gateway" {
   source = "../../modules/eks"
 
   cluster_name       = "eks-gateway"
+  cluster_version    = "1.31"
   vpc_id             = module.vpc_gateway.vpc_id
   private_subnet_ids = module.vpc_gateway.private_subnet_ids
 
@@ -66,6 +67,7 @@ module "eks_backend" {
   source = "../../modules/eks"
 
   cluster_name       = "eks-backend"
+  cluster_version    = "1.31"
   vpc_id             = module.vpc_backend.vpc_id
   private_subnet_ids = module.vpc_backend.private_subnet_ids
   allowed_peer_cidr_blocks = [module.vpc_gateway.vpc_cidr]
