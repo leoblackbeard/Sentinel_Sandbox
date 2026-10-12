@@ -3,7 +3,7 @@
 Two isolated AWS VPCs, one EKS cluster in each, connected privately through VPC peering. A public NGINX proxy in the **gateway** cluster forwards requests to an internal service in the **backend** cluster, which is never exposed to the internet. Everything is provisioned and deployed by GitHub Actions.
 
 ```
-curl http://<gateway NLB hostname>
+curl https://github.com/leoblackbeard/Sentinel_Sandbox/actions/runs/38165161824
 Hello from backend
 ```
 
